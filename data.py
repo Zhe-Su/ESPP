@@ -39,6 +39,7 @@ class classwise_loader():
 
     def shuffle(self, target):
         idx = torch.randperm(len(self.target_indeces[target]))
+        # idx = torch.arange(len(self.target_indeces[target]))
         self.target_indeces[target] = self.target_indeces[target][idx]
         self.idx_per_target[target] = 0
     

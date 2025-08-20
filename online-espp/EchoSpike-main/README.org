@@ -1,2 +1,0 @@
-* EchoSpike Predictive Plasticity (ESPP): A Novel Local Online Learning Rule for Spiking Neural Networks 
-This is the GitHub repository for the paper "EchoSpike Predictive Plasticity: A Novel Local Online Learning Rule for Spiking Neural Networks"

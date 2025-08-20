@@ -1,4 +1,4 @@
-import torch
+llimport torch
 import torch.nn as nn
 import snntorch as snn
 
@@ -63,9 +63,10 @@ class EchoSpike(nn.Module):
         return accuracies
 
     def forward(self, inp, bf: int, freeze: list=[], inp_activity=None):
-        with torch.no_grad():
+        # with torch.no_grad():
             mems = len(self.layers)*[None]
             losses = torch.zeros(len(self.layers), device=inp.device)
+            grad = None
             # define input for first layer
             if self.recurrency_type not in ['none', 'dense']:
                 if self.hidden_state is None:
@@ -87,7 +88,7 @@ class EchoSpike(nn.Module):
 
             for idx, layer in enumerate(self.layers):
                 factor = bf if not idx in freeze else 0
-                spk, mem, loss = layer(layer_in, factor, inp_activity=inp_activity)
+                spk, mem, loss, grad = layer(layer_in, factor, inp_activity=inp_activity)
                 if idx < len(self.layers) - 1:
                     if self.recurrency_type == 'full':
                         layer_in = torch.cat((inp, spk, *self.hidden_state[idx+1:], *out_spk), dim=1)
@@ -108,7 +109,7 @@ class EchoSpike(nn.Module):
                 else:
                     self.hidden_state = out_spk
 
-        return out_spk, mems, losses
+            return out_spk, mems, losses, grad
 
 class EchoSpike_layer(nn.Module):
     def __init__(self, num_inputs:int, num_hidden: int, beta:float, n_time_steps: int=100, online=False, c_y=[1e-4, -1e-4], inp_thr=0.05):
@@ -230,8 +231,9 @@ class EchoSpike_layer(nn.Module):
         inp = torch.atleast_2d(inp)
         cur = self.fc(inp)
         spk, self.mem = self.lif(cur, self.mem)
-        self.spk_trace = self._update_trace(self.spk_trace, spk, decay=False)
+        self.spk_trace = self._update_trace(self.spk_trace, spk, decay=True) # NOTE: decay was False
         loss = torch.tensor(0.)
+        grad = None
 
         if self.training and bf != 0:
             self.inp_trace = self._update_trace(self.inp_trace, inp)
@@ -260,11 +262,13 @@ class EchoSpike_layer(nn.Module):
                     dL = (loss > 0) * (inp_activity > self.inp_thr)
                     self.acc += dL.float().mean()/self.n_time_steps
                     current_dW = bf * torch.einsum('bi, bj->bij', self.prev_spk_trace * EchoSpike_layer._surrogate(self.mem - 1), self.inp_trace)
-                    self.fc.weight.grad = -torch.einsum('bvw,b->vw', current_dW, dL.float())
+                    grad = -torch.einsum('bvw,b->vw', current_dW, dL.float())
+                    # self.fc.weight.grad = -torch.einsum('bvw->vw', current_dW)
+
 
         elif bf != 0 and self.prev_spk_trace is not None:
             loss = self.loss(bf, spk)
-        return spk, self.mem, loss.mean()
+        return spk, self.mem, loss.mean(), grad
 
 
 class simple_out(nn.Module):
@@ -283,7 +287,7 @@ class simple_out(nn.Module):
         self.mem = self.lif.init_leaky()
         self.inp_trace = None
         self.dW = None
-     
+    
     def _surrogate(self, x):
         return 1 / (torch.pi * (1 + (torch.pi * x) ** 2))
     

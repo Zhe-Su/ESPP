@@ -8,15 +8,15 @@ import pickle
 class Args:
     def __init__(self):
         self.model_name = 'test'
-        self.dataset = 'shd'
+        self.dataset = 'nmnist'
         self.online = True
-        self.device = 'cpu'
+        self.device = 'cuda'
         self.recurrency_type = 'dense'
         self.lr = 1e-4
         self.epochs = 1000
-        self.augment = True
+        self.augment = False
         self.batch_size = 128 # 64 saccade and 64 predictive before weight update -> 128
-        self.n_hidden = 4*[450]
+        self.n_hidden = 3*[200]
         if self.dataset == 'nmnist':
             self.c_y = [1e-4, -1e-4] if not self.online else [2, -1]
             self.inp_thr = 0.02
@@ -57,7 +57,8 @@ if __name__ == '__main__':
     SNN = EchoSpike(args.n_inputs, args.n_hidden, c_y= args.c_y, beta=args.beta,
                      device=args.device, recurrency_type=args.recurrency_type,
                      n_time_steps=args.n_time_bins, online=args.online, inp_thr=args.inp_thr).to(args.device)
-
+    SNN.reset(0) # after sending to cuda the espp_layers' mem is not on cuda, resetting fixes that
+    
     loss_hist = train(SNN, train_loader, args.epochs, args.device, args.model_name,
                             batch_size=args.batch_size, online=args.online, lr=args.lr, augment=args.augment)
 

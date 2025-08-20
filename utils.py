@@ -31,7 +31,6 @@ def train(net, trainloader, epochs, device, model_name, batch_size=1, freeze=[],
     bf = 0
     target = [torch.randint(trainloader.num_classes, (1,)).item() for _ in range(batch_size)]
     spks = torch.zeros(len(net.layers)+1, device=device)
-
     while True:
         # Train loop
         data, target = trainloader.next_item(target, contrastive=(bf==-1))
@@ -41,18 +40,20 @@ def train(net, trainloader, epochs, device, model_name, batch_size=1, freeze=[],
         target = target.to(device)
         sample_loss = torch.zeros(len(net.layers), device=device)
 
+        i = 0
         for step in range(data.shape[0]):
             # iterate over time steps
             if online:
                 inp_activity = data[step].mean(axis=-1)
             else:
                 inp_activity = None
-            spk, _, loss = net(data[step], torch.tensor(bf, device=device), freeze, inp_activity=inp_activity)
+            spk, _, loss, grad = net(data[step], torch.tensor(bf, device=device), freeze, inp_activity=inp_activity)
             spks += torch.stack([data[step].mean(), *[sp.mean() for sp in spk]])    # to analyze nr of spks
             sample_loss += loss
             if online:
                 optimizer.step()
                 optimizer.zero_grad()
+            i += 1
 
         loss_hist.append(sample_loss/data.shape[0]) 
         accuracies.append(net.reset(bf))
@@ -70,7 +71,7 @@ def train(net, trainloader, epochs, device, model_name, batch_size=1, freeze=[],
             print(f"Epoch {epoch}, Step {step} \nEchoSpike Loss: {torch.stack(loss_hist[-print_interval//batch_size:]).mean(axis=0)}")
             print(f"Acc: {torch.stack(accuracies).mean(axis=0)}")
             accuracies = []
-            print(f"Spks: {spks*batch_size/print_interval}")
+            print(f"Spks: {spks*batch_size/print_interval}") # sparsity ratio
             spks = torch.zeros(len(net.layers)+1, device=device)
         if epoch >= epochs:
             break
@@ -79,7 +80,6 @@ def train(net, trainloader, epochs, device, model_name, batch_size=1, freeze=[],
             current_epoch_loss = torch.stack(loss_hist[-20*len(trainloader)//batch_size:]).mean().item()
             print(f'epoch loss: {current_epoch_loss}')
             torch.save(net.state_dict(), f'models/{model_name}_epoch{epoch}.pt')
-            
     return torch.stack(loss_hist)
 
 
