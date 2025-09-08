@@ -1,0 +1,9 @@
+# @package _global_
+dataset: 'pmnist'
+c_y: [1e-4, -1e-4]
+inp_thr: 0.0
+n_inputs: 784  # 28*28
+n_outputs: 10
+poisson_scale: 0.8
+n_time_bins: 10
+beta: 0.9

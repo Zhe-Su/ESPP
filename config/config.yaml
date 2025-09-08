@@ -1,0 +1,17 @@
+defaults:
+  - dataset: nmnist
+  - _self_
+
+# Model configuration
+model_name: 'test'
+online: true
+device: 'cuda'
+recurrency_type: 'dense'
+lr: 1e-4
+epochs: 1000
+augment: false
+batch_size: 128
+n_hidden: [200, 200, 200]
+
+# Training parameters
+seed: 123

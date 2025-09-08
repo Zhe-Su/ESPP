@@ -1,0 +1,9 @@
+# @package _global_
+dataset: 'nmnist'
+c_y: [2, -1]  # online mode default
+c_y_offline: [1e-4, -1e-4]  # offline mode
+inp_thr: 0.02
+n_inputs: 2312  # 2*34*34
+n_outputs: 10
+n_time_bins: 10
+beta: 0.9

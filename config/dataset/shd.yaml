@@ -1,0 +1,9 @@
+# @package _global_
+dataset: 'shd'
+inp_thr: 0.05
+c_y: [1.5, -1.5]  # online mode default
+c_y_offline: [8e-4, -4e-4]  # offline mode
+n_inputs: 700
+n_outputs: 20
+n_time_bins: 100
+beta: [0.94, 0.96, 0.98, 1.0]
