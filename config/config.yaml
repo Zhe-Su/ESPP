@@ -18,7 +18,7 @@ seed: 123
 
 # Common parameters
 common:
-  resume: false
+  resume: true
 
 hydra:
   job: 

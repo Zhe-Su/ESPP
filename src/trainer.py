@@ -1,3 +1,4 @@
+import os
 import torch
 from data import augment_shd, load_classwise_NMNIST, load_classwise_PMNIST, load_SHD
 import numpy as np
@@ -23,7 +24,10 @@ class Trainer:
         # Set c_y based on online mode
         if hasattr(cfg, 'c_y_offline') and not cfg.online:
             cfg.c_y = cfg.c_y_offline
-            
+        
+        print(hydra.utils.get_original_cwd())
+        import os
+        print(os.getcwd())
         # Store configuration
         self.cfg = cfg
         self.device = cfg.device if isinstance(cfg.device, torch.device) else torch.device(cfg.device)
@@ -54,6 +58,7 @@ class Trainer:
         Returns:
             tuple: (train_loader, test_loader)
         """
+
         if self.cfg.dataset == 'nmnist':
             train_loader, _, test_loader = load_classwise_NMNIST(
                 self.cfg.n_time_bins, split_train=True, batch_size=self.cfg.batch_size
@@ -132,11 +137,14 @@ class Trainer:
         spks = torch.zeros(len(self.SNN.layers) + 1, device=self.device)
         
         while True:
+
             # Train loop
             data, target = self.train_loader.next_item(target, contrastive=(bf == -1))
+
             data = data.float().to(self.device)
             if self.augment:
                 data = augment_shd(data)
+
             target = target.to(self.device)
             sample_loss = torch.zeros(len(self.SNN.layers), device=self.device)
 
@@ -154,7 +162,6 @@ class Trainer:
                     optimizer.step()
                     optimizer.zero_grad()
                 i += 1
-
             loss_hist.append(sample_loss / data.shape[0]) 
             accuracies.append(self.SNN.reset(bf))
 
@@ -180,6 +187,7 @@ class Trainer:
                 current_epoch_loss = torch.stack(loss_hist[-20 * len(self.train_loader) // self.batch_size:]).mean().item()
                 print(f'epoch loss: {current_epoch_loss}')
                 self.save_checkpoint(epoch)
+        
 
         # Save final model and loss history
         loss_hist_tensor = torch.stack(loss_hist)
