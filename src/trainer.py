@@ -63,6 +63,10 @@ class Trainer:
                             n_time_steps=cfg.n_time_bins, online=cfg.online, inp_thr=cfg.inp_thr)
         self.SNN = self.SNN.to(self.device)
         self.SNN.reset(0)  # after sending to cuda the espp_layers' mem is not on cuda, resetting fixes that
+        
+        # Create optimizer
+        self.optimizer = torch.optim.SGD([{"params": layer.fc.parameters(), 'lr': self.lr} for layer in self.SNN.layers])
+        self.optimizer.zero_grad()
     
     def _create_datasets(self):
         """
@@ -111,16 +115,25 @@ class Trainer:
             original_hydra_config = OmegaConf.load(original_hydra_path)
             self.data_dir = Path(original_hydra_config.hydra.runtime.cwd) / 'data'
      
-    def save_checkpoint(self, epoch):
+    def save_checkpoint(self, epoch, step=None):
         """
         Save model checkpoint.
 
         Args:
             epoch (int): Epoch number for intermediate checkpoints.
+            step (int, optional): Current training step
         """
         checkpoint_path = self.ckpt_dir / f'{self.cfg.model_name}_epoch_{epoch}.pt'
-        checkpoint = {'model_state_dict': self.SNN.state_dict(),
-                      'epoch': epoch,}
+        checkpoint = {
+            'model_state_dict': self.SNN.state_dict(),
+            'optimizer_state_dict': self.optimizer.state_dict(),
+            'epoch': epoch,
+            'model_name': self.cfg.model_name,
+        }
+        
+        if step is not None:
+            checkpoint['step'] = step
+            
         torch.save(checkpoint, checkpoint_path)
         self.logger.info(f"Saved checkpoint at epoch {epoch}: {checkpoint_path}")
         
@@ -135,7 +148,110 @@ class Trainer:
         loss_path = self.ckpt_dir / f'{self.cfg.model_name}_loss_hist.pt'
         torch.save(loss_hist, loss_path)
         self.logger.info(f"Saved loss history: {loss_path}")
+    
+    def resume_from_checkpoint(self):
+        """
+        Resume training from the latest checkpoint.
+        
+        Returns:
+            tuple: (start_epoch, loss_history) where start_epoch is the epoch to resume from
+                   and loss_history is the previous loss history
+        """
+        if not self.resume:
+            return 0, []
+            
+        # Find the latest checkpoint
+        checkpoint_files = list(self.ckpt_dir.glob(f'{self.cfg.model_name}_epoch_*.pt'))
+        if not checkpoint_files:
+            self.logger.warning("No checkpoint files found. Starting from scratch.")
+            return 0, []
+        
+        # Sort by epoch number and get the latest
+        latest_checkpoint = max(checkpoint_files, key=lambda x: int(x.stem.split('_')[-1]))
+        
+        self.logger.info(f"Loading checkpoint from: {latest_checkpoint}")
+        checkpoint = torch.load(latest_checkpoint, map_location=self.device)
+        
+        # Load model state
+        self.SNN.load_state_dict(checkpoint['model_state_dict'])
+        start_epoch = checkpoint['epoch']
+        
+        # Load optimizer state if available
+        if 'optimizer_state_dict' in checkpoint:
+            try:
+                self.optimizer.load_state_dict(checkpoint['optimizer_state_dict'])
+                self.logger.info("Loaded optimizer state from checkpoint")
+            except Exception as e:
+                self.logger.warning(f"Could not load optimizer state: {e}")
+        
+        # Load loss history if available
+        loss_hist_path = self.ckpt_dir / f'{self.cfg.model_name}_loss_hist.pt'
+        loss_history = []
+        if loss_hist_path.exists():
+            try:
+                loss_history = torch.load(loss_hist_path, map_location=self.device)
+                loss_history = loss_history.tolist() if isinstance(loss_history, torch.Tensor) else loss_history
+                self.logger.info(f"Loaded loss history with {len(loss_history)} entries")
+            except Exception as e:
+                self.logger.warning(f"Could not load loss history: {e}")
+                loss_history = []
+        
+        self.logger.info(f"Resumed from epoch {start_epoch}")
+        return start_epoch, loss_history
 
+    def get_latest_checkpoint_path(self):
+        """
+        Get the path to the latest checkpoint file.
+        
+        Returns:
+            Path or None: Path to the latest checkpoint file, or None if no checkpoints exist
+        """
+        checkpoint_files = list(self.ckpt_dir.glob(f'{self.cfg.model_name}_epoch_*.pt'))
+        if not checkpoint_files:
+            return None
+        
+        # Sort by epoch number and get the latest
+        return max(checkpoint_files, key=lambda x: int(x.stem.split('_')[-1]))
+    
+    def load_model_for_inference(self, checkpoint_path=None, load_optimizer=False):
+        """
+        Load a trained model for inference.
+        
+        Args:
+            checkpoint_path (str or Path, optional): Path to specific checkpoint. 
+                                                   If None, loads the latest checkpoint.
+            load_optimizer (bool): Whether to load optimizer state for potential training resumption
+        
+        Returns:
+            bool: True if model loaded successfully, False otherwise
+        """
+        if checkpoint_path is None:
+            checkpoint_path = self.get_latest_checkpoint_path()
+        
+        if checkpoint_path is None:
+            self.logger.error("No checkpoint found for inference")
+            return False
+        
+        try:
+            self.logger.info(f"Loading model from: {checkpoint_path}")
+            checkpoint = torch.load(checkpoint_path, map_location=self.device)
+            self.SNN.load_state_dict(checkpoint['model_state_dict'])
+            
+            # Load optimizer state if requested and available
+            if load_optimizer and 'optimizer_state_dict' in checkpoint:
+                try:
+                    self.optimizer.load_state_dict(checkpoint['optimizer_state_dict'])
+                    self.logger.info("Loaded optimizer state for potential training resumption")
+                except Exception as e:
+                    self.logger.warning(f"Could not load optimizer state: {e}")
+            
+            self.SNN.eval()
+            self.logger.info("Model loaded successfully for inference")
+            return True
+        except Exception as e:
+            self.logger.error(f"Failed to load model: {e}")
+            return False
+    
     def train(self, freeze=[]):
         """
         Trains a SNN.
@@ -147,89 +263,129 @@ class Trainer:
             torch.Tensor: A tensor containing the loss history during training.
         """
         torch.set_grad_enabled(False)
-        loss_hist = []
+        
+        # Resume from checkpoint if requested
+        start_epoch, loss_hist = self.resume_from_checkpoint()
+        
         accuracies = []
         print_interval = 100 * self.batch_size if 'mnist' in self.cfg.dataset else 40 * self.batch_size
         
-        self.logger.info(f"Starting training for {self.cfg.epochs} epochs")
+        self.logger.info(f"Starting training for {self.cfg.epochs} epochs (resuming from epoch {start_epoch})")
         self.logger.info(f"Batch size: {self.batch_size}, Learning rate: {self.lr}")
         self.logger.info(f"Online mode: {self.online}, Augmentation: {self.augment}")
         
-        # training loop
-        optimizer = torch.optim.SGD([{"params": par.fc.parameters(), 'lr': self.lr} for par in self.SNN.layers])
-        optimizer.zero_grad()
         self.SNN.train()
+        
+        # Initialize training state
         bf = 0
         target = [torch.randint(self.train_loader.num_classes, (1,)).item() for _ in range(self.batch_size)]
         spks = torch.zeros(len(self.SNN.layers) + 1, device=self.device)
         
-        while True:
-
-            # Train loop
+        # Calculate total steps and current position
+        total_steps_per_epoch = len(self.train_loader)
+        target_total_steps = self.cfg.epochs * total_steps_per_epoch
+        current_step = len(loss_hist) * self.batch_size if loss_hist else 0
+        
+        self.logger.info(f"Target total steps: {target_total_steps}, Starting from step: {current_step}")
+        
+        # Main training loop
+        while current_step < target_total_steps:
+            # Process one batch
             data, target = self.train_loader.next_item(target, contrastive=(bf == -1))
-
             data = data.float().to(self.device)
+            
             if self.augment:
                 data = augment_shd(data)
 
             target = target.to(self.device)
             sample_loss = torch.zeros(len(self.SNN.layers), device=self.device)
 
-            i = 0
-            for step in range(data.shape[0]):
-                # iterate over time steps
-                if self.online:
-                    inp_activity = data[step].mean(axis=-1)
-                else:
-                    inp_activity = None
-                spk, _, loss, grad = self.SNN(data[step], torch.tensor(bf, device=self.device), freeze, inp_activity=inp_activity)
-                spks += torch.stack([data[step].mean(), *[sp.mean() for sp in spk]])    # to analyze nr of spks
+            # Process time steps
+            for time_step in range(data.shape[0]):
+                # Get input activity if online mode
+                inp_activity = data[time_step].mean(axis=-1) if self.online else None
+                
+                # Forward pass
+                spk, _, loss, grad = self.SNN(data[time_step], torch.tensor(bf, device=self.device), 
+                                            freeze, inp_activity=inp_activity)
+                
+                # Accumulate spike statistics
+                spks += torch.stack([data[time_step].mean(), *[sp.mean() for sp in spk]])
                 sample_loss += loss
+                
+                # Online weight update
                 if self.online:
-                    optimizer.step()
-                    optimizer.zero_grad()
-                i += 1
-            loss_hist.append(sample_loss / data.shape[0]) 
+                    self.optimizer.step()
+                    self.optimizer.zero_grad()
+            
+            # Store loss and accuracy
+            loss_hist.append(sample_loss / data.shape[0])
             accuracies.append(self.SNN.reset(bf))
 
+            # Offline weight update (after contrastive batch)
             if bf == -1 and not self.online:
-                # update weights after one predictive and one contrastive batch, before weight update
-                optimizer.step()
-                optimizer.zero_grad()
+                self.optimizer.step()
+                self.optimizer.zero_grad()
+            
+            # Toggle between predictive and contrastive phases
             bf = 1 if bf != 1 else -1
-
-            step = len(loss_hist) * self.batch_size
-            epoch = step // len(self.train_loader)
-            if step % print_interval < self.batch_size and len(loss_hist) > 1:
-                # log loss and accuracy
-                avg_loss = torch.stack(loss_hist[-print_interval//self.batch_size:]).mean(axis=0)
-                avg_acc = torch.stack(accuracies).mean(axis=0)
-                spikes = spks * self.batch_size / print_interval
-                
-                self.logger.info(f"Epoch {epoch}, Step {step}")
-                self.logger.info(f"EchoSpike Loss: {avg_loss}")
-                self.logger.info(f"Accuracy: {avg_acc}")
-                self.logger.info(f"Spikes: {spikes}")
-                
+            
+            # Update step counter
+            current_step = len(loss_hist) * self.batch_size
+            current_epoch = current_step // total_steps_per_epoch
+            
+            # Logging and checkpointing
+            self._handle_logging_and_checkpointing(
+                loss_hist, accuracies, spks, current_step, current_epoch, 
+                print_interval, total_steps_per_epoch
+            )
+            
+            # Reset spike counter and accuracies after logging
+            if current_step % print_interval < self.batch_size and len(loss_hist) > 1:
                 accuracies = []
                 spks = torch.zeros(len(self.SNN.layers) + 1, device=self.device)
-            if epoch >= self.cfg.epochs:
-                break
-            if step % len(self.train_loader) < self.batch_size and epoch % 20 == 0:
-                # save checkpoint
-                current_epoch_loss = torch.stack(loss_hist[-20 * len(self.train_loader) // self.batch_size:]).mean().item()
-                self.logger.info(f'Epoch {epoch} loss: {current_epoch_loss}')
-                self.save_checkpoint(epoch)
-        
 
         # Save final model and loss history
         loss_hist_tensor = torch.stack(loss_hist)
         self.save_loss_history(loss_hist_tensor)
+        self.save_checkpoint(current_epoch, current_step)
         
-        self.save_checkpoint(epoch)
-        self.logger.info(f"Training completed. Total epochs: {self.cfg.epochs}")
-
+        self.logger.info(f"Training completed. Total epochs: {current_epoch}")
         return loss_hist_tensor
+    
+    def _handle_logging_and_checkpointing(self, loss_hist, accuracies, spks, current_step, 
+                                        current_epoch, print_interval, total_steps_per_epoch):
+        """
+        Handle logging and checkpointing during training.
+        
+        Args:
+            loss_hist (list): List of loss values
+            accuracies (list): List of accuracy values
+            spks (torch.Tensor): Spike statistics
+            current_step (int): Current training step
+            current_epoch (int): Current epoch
+            print_interval (int): Interval for logging
+            total_steps_per_epoch (int): Total steps per epoch
+        """
+        # Periodic logging
+        if current_step % print_interval < self.batch_size and len(loss_hist) > 1:
+            avg_loss = torch.stack(loss_hist[-print_interval//self.batch_size:]).mean(axis=0)
+            avg_acc = torch.stack(accuracies).mean(axis=0)
+            spikes = spks * self.batch_size / print_interval
+            
+            self.logger.info(f"Epoch {current_epoch}, Step {current_step}")
+            self.logger.info(f"EchoSpike Loss: {avg_loss}")
+            self.logger.info(f"Accuracy: {avg_acc}")
+            self.logger.info(f"Spikes: {spikes}")
+        
+        # Periodic checkpointing (every 20 epochs)
+        if (current_step % total_steps_per_epoch < self.batch_size and 
+            current_epoch % 20 == 0 and current_epoch > 0):
+            recent_losses = loss_hist[-20 * total_steps_per_epoch // self.batch_size:]
+            if recent_losses:
+                current_epoch_loss = torch.stack(recent_losses).mean().item()
+                self.logger.info(f'Epoch {current_epoch} loss: {current_epoch_loss}')
+                self.save_checkpoint(current_epoch, current_step)
 
     def test(self):
         """
