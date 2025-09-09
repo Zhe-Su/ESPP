@@ -15,3 +15,7 @@ n_hidden: [200, 200, 200]
 
 # Training parameters
 seed: 123
+
+# Common parameters
+common:
+  resume: false
