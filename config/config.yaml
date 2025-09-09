@@ -19,3 +19,7 @@ seed: 123
 # Common parameters
 common:
   resume: false
+
+hydra:
+  job: 
+    chdir: true

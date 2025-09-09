@@ -83,10 +83,10 @@ class Trainer:
             config_dir.mkdir(exist_ok=False, parents=False)
             shutil.copy('.hydra/config.yaml', config_path)
             shutil.copytree(src=(Path(hydra.utils.get_original_cwd()) / "src"), dst="./src")
-            shutil.copytree(src=(Path(hydra.utils.get_original_cwd()) / "config"), dst="./config")
+            shutil.copytree(src=(Path(hydra.utils.get_original_cwd()) / "config"), dst="./config", dirs_exist_ok=True)
             self.ckpt_dir.mkdir(exist_ok=False, parents=False)
             self.media_dir.mkdir(exist_ok=False, parents=False)
-    
+     
     def save_checkpoint(self, epoch):
         """
         Save model checkpoint.
