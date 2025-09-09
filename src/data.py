@@ -1,7 +1,11 @@
+from pathlib import Path
+
+import hydra
+import snntorch as snn
 import torch
 from torch.utils.data import DataLoader, TensorDataset
-import snntorch as snn
 from torchvision.transforms import v2
+from hydra.utils import to_absolute_path
 
 
 def augment_nmnist(x):
@@ -16,7 +20,7 @@ def augment_shd(x):
 
 class classwise_loader():
     def __init__(self, x, y, num_classes, batch_size=1):
-        torch.manual_seed(123)
+        # torch.manual_seed(123)
         if type(x) == torch.Tensor:
             # For regular MNIST & SHD
             self.x = x
@@ -74,19 +78,18 @@ class classwise_loader():
         return self.x[indeces,].transpose(0, 1), self.y[indeces,]
 
 
-def load_SHD(batch_size=1):
+def load_SHD(batch_size=1, data_dir=Path('data')):
     # load SHD dataset
-    # Note: SHD dataset originally from tonic, but due to a bug on the cluster I had to first download it locally
-    shd_train_x = torch.load('./data/SHD/shd_train_x.torch')
-    shd_train_y = torch.load('./data/SHD/shd_train_y.torch').squeeze()
+    shd_train_x = torch.load(data_dir / "SHD/shd_train_x.torch")
+    shd_train_y = torch.load(data_dir / "SHD/shd_train_y.torch").squeeze()
     train_loader = classwise_loader(shd_train_x, shd_train_y, 20, batch_size=batch_size)
 
-    shd_test_x = torch.load('./data/SHD/shd_test_x.torch')
-    shd_test_y = torch.load('./data/SHD/shd_test_y.torch').squeeze()
+    shd_test_x = torch.load(data_dir / "SHD/shd_test_x.torch")
+    shd_test_y = torch.load(data_dir / "SHD/shd_test_y.torch").squeeze()
     test_loader = classwise_loader(shd_test_x, shd_test_y, 20, batch_size=batch_size)
     return train_loader, test_loader
 
-def load_classwise_NMNIST(n_time_steps, split_train=False, batch_size=1):
+def load_classwise_NMNIST(n_time_steps, split_train=False, batch_size=1, data_dir=Path('data')):
     """
     Load the Poisson spike encoded MNIST dataset with the specified parameters.
 
@@ -100,7 +103,8 @@ def load_classwise_NMNIST(n_time_steps, split_train=False, batch_size=1):
         test_loader (torch.utils.data.DataLoader): The data loader for the test set.
     """
     import tonic
-    from tonic import transforms, DiskCachedDataset
+    from tonic import DiskCachedDataset, transforms
+
     # load NMNIST dataset
     sensor_size = tonic.datasets.NMNIST.sensor_size
     print(sensor_size)
@@ -109,11 +113,11 @@ def load_classwise_NMNIST(n_time_steps, split_train=False, batch_size=1):
                                  n_time_bins=n_time_steps)]
     frame_transform = transforms.Compose(transf)
 
-    trainset = tonic.datasets.NMNIST(save_to='./data',
+    trainset = tonic.datasets.NMNIST(save_to=data_dir,
                                      transform=frame_transform, train=True, first_saccade_only=True)
-    testset = tonic.datasets.NMNIST(save_to='./data',
+    testset = tonic.datasets.NMNIST(save_to=data_dir,
                                     transform=frame_transform, train=False, first_saccade_only=True)
-    trainset_cached = DiskCachedDataset(trainset, cache_path="./data")
+    trainset_cached = DiskCachedDataset(trainset, cache_path=data_dir)
 
     test_loader = classwise_loader(testset, testset.targets, 10, batch_size)
 
@@ -134,7 +138,7 @@ def load_classwise_NMNIST(n_time_steps, split_train=False, batch_size=1):
     train_loader = classwise_loader(trainset, 10, batch_size)
     return train_loader, test_loader
 
-def load_classwise_PMNIST(n_time_steps, scale=1, split_train=False):
+def load_classwise_PMNIST(n_time_steps, scale=1, split_train=False, data_dir=Path('data')):
     """
     Load the Poisson spike encoded MNIST dataset with the specified parameters.
 
@@ -149,11 +153,11 @@ def load_classwise_PMNIST(n_time_steps, scale=1, split_train=False):
     """
     import torchvision
     import torchvision.transforms as transforms
-    torch.manual_seed(123)
-    trainset = torchvision.datasets.MNIST(root='./data', 
+    # torch.manual_seed(123)
+    trainset = torchvision.datasets.MNIST(root=data_dir, 
                                             train=True, 
                                            download=True)
-    testset = torchvision.datasets.MNIST(root='./data', 
+    testset = torchvision.datasets.MNIST(root=data_dir, 
                                             train=False, 
                                            download=True)
     train_x = snn.spikegen.rate(trainset.data * 2**-8 * scale, n_time_steps).swapaxes(0,1).view(trainset.data.shape[0], n_time_steps, -1)
@@ -174,7 +178,7 @@ def load_classwise_PMNIST(n_time_steps, scale=1, split_train=False):
     return train_loader, test_loader
 
 
-def load_PMNIST(n_time_steps, batch_size=1, scale=1, patches=False):
+def load_PMNIST(n_time_steps, batch_size=1, scale=1, patches=False, data_dir=Path('data')):
     """
     Load the Poisson spike encoded MNIST dataset with the specified parameters.
 
@@ -195,11 +199,11 @@ def load_PMNIST(n_time_steps, batch_size=1, scale=1, patches=False):
     if patches:
         transform = transforms.Compose([transforms.ToTensor(),
                                         lambda x: torch.stack([x[:,:14,:14], x[:,:14,14:], x[:,14:,14:], x[:,14:,:14]])])
-    trainset = torchvision.datasets.MNIST(root='./data', 
+    trainset = torchvision.datasets.MNIST(root=data_dir, 
                                             train=True, 
                                        transform=transform,  
                                            download=True)
-    testset = torchvision.datasets.MNIST(root='./data', 
+    testset = torchvision.datasets.MNIST(root=data_dir, 
                                             train=False, 
                                        transform=transform,  
                                            download=True)
@@ -210,7 +214,7 @@ def load_PMNIST(n_time_steps, batch_size=1, scale=1, patches=False):
                                             shuffle=False) 
     return train_loader, test_loader
 
-def load_half_MNIST(batch_size=1):
+def load_half_MNIST(batch_size=1, data_dir=Path('data')):
     """
     Load the MNIST dataset and split images into two halfs.
     
@@ -225,11 +229,11 @@ def load_half_MNIST(batch_size=1):
     import torchvision.transforms as transforms
     transform = transforms.Compose([transforms.ToTensor(),
                                     lambda x: torch.stack([x[:,:,:14], x[:,:,14:]])])
-    trainset = torchvision.datasets.MNIST(root='./data', 
+    trainset = torchvision.datasets.MNIST(root=data_dir, 
                                             train=True, 
                                        transform=transform,  
                                            download=True)
-    testset = torchvision.datasets.MNIST(root='./data', 
+    testset = torchvision.datasets.MNIST(root=data_dir, 
                                             train=False, 
                                        transform=transform,  
                                            download=True)
@@ -239,3 +243,4 @@ def load_half_MNIST(batch_size=1):
     test_loader = torch.utils.data.DataLoader(dataset=testset, batch_size=batch_size, 
                                             shuffle=False) 
     return train_loader, test_loader
+

@@ -3,7 +3,7 @@ defaults:
   - _self_
 
 # Model configuration
-model_name: 'test'
+model_name: 'espp_model'
 online: true
 device: 'cuda'
 recurrency_type: 'dense'
@@ -18,8 +18,12 @@ seed: 123
 
 # Common parameters
 common:
-  resume: true
+  resume: false
 
 hydra:
   job: 
     chdir: true
+  job_logging:
+    root:
+      level: ERROR
+  verbose: [trainer]

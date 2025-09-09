@@ -9,10 +9,10 @@ This repository accompanies the work "EchoSpike Predictive Plasticity: A Novel L
 
 ## Repository Structure
 - `src/`: Core source code directory
-  - `main.py`: Entry point using Hydra configuration management
-  - `trainer.py`: Training orchestration and experiment management
+  - `main.py`: Entry point
+  - `trainer.py`: Trainer class
   - `model.py`: EchoSpike network (`EchoSpike`) and layer (`EchoSpike_layer`)
-  - `utils.py`: Training loop, evaluation helpers, readout training utilities
+  - `utils.py`: Evaluation helpers, readout training utilities
   - `data.py`: Dataset loaders and class-wise sampling loader
 - `config/`: Hydra configuration files
   - `config.yaml`: Main configuration file with model and training parameters
@@ -170,11 +170,6 @@ outputs/
 │       │   └── ...
 
 ```
-
-Trained artifacts are also saved to `models/` for compatibility:
-- `models/{model_name}.pt`: Final model weights
-- `models/{model_name}_loss_hist.pt`: Training loss history
-- `models/{model_name}_args.pkl`: Training arguments (for legacy compatibility)
 
 ## Configuration Reference
 

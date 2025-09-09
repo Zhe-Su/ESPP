@@ -13,12 +13,10 @@ def main(cfg: DictConfig) -> None:
     
     # Initialize trainer (handles dataset creation, model creation, and directory setup)
     trainer = Trainer(cfg)
-    
+
     # Train model
     trainer.train()
 
 
 if __name__ == '__main__':
     main()
-
-
